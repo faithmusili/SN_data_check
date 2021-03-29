@@ -1,0 +1,370 @@
+---
+title: "SN PDM R3 Data Check for 22/10/2020" ## change the day
+author: " By Faith" ## change the name
+output: word_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r specify some variants, include=FALSE}
+check_date <- as.Date("2020-10-22")## specify the data you are conducting the check for
+data_path <- "data/2020_10_22.csv" ## specify the path to your data
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, comment = NA,warning = FALSE,message = FALSE,prompt=FALSE,cache=FALSE,results='asis')
+```
+
+```{r load required libraries, include=FALSE}
+library(tidyverse) # data cleaning
+library(summarytools) # summary stat
+library(readr) # data load
+library(naniar) # dealing with missing values
+library(skimr) # data summary stat
+library(ggplot2) ## plotting
+library(splitstackshape)
+```
+
+```{r reading in the data,include=FALSE}
+sn_pdm_full <- read_csv(data_path)%>%
+  filter(ONA_username != "dekfarah"&## remove 2 test surveys by Dek and Andy
+ONA_username != "a.seal@ucl.ac.uk")
+
+
+na_strings <- c("NA", "N A", "N / A", "N/A", "n/a") # write out all the offending strings
+sn_pdm_full <- sn_pdm_full %>%
+  replace_with_na_all(condition = ~.x %in% na_strings)
+
+sn_pdm_full$HouseholdSize<-apply(sn_pdm_full[,c(match("l1",names(sn_pdm_full)):match("l12",names(sn_pdm_full)))], MARGIN = 1, function(x) sum(!is.na(x)))
+
+dim(sn_pdm_full) #check the number of observations and variables
+```
+
+```{r remove disabled columns, include=FALSE}
+sn_pdm_full <- sn_pdm_full%>%
+  select(!c(less_expensive:csi_SCORE, Participation)) # deselect disable inactive variables (less_expensive:csi_SCORE, Participation)
+```
+
+```{r format today check_date column, include=FALSE}
+typeof(sn_pdm_full$today)
+sn_pdm_full$today <- as.Date(sn_pdm_full$today) ## convert the today variable to check_date format
+```
+
+```{r create short and long survey variables, include=FALSE}
+sn_pdm <- sn_pdm_full %>%
+  mutate(min = `_duration`/60,
+         short_survey = min<12,# define short surveys
+         long_survey =min >=120, # define long surveys
+         criteria_clean = ifelse(Interview_criteria %in% "If most information is matching and respondent confirms that you are speaking with the selected household, please proceed with the survey", "matching",
+                                 ifelse(Interview_criteria %in% "If most information is not matching, go to end of survey and notify your team leader.", "non-matching",NA)))# define matching and non-matching intervews
+
+```
+
+```{r matching and non-matching surveys for today, include=FALSE}
+criteria <- table(sn_pdm$today,sn_pdm$criteria_clean)%>%data.frame()%>%filter(as.character(Var1)==check_date)
+```
+
+```{r number of short and long surveys,include=FALSE}
+short <- sn_pdm%>%filter(today==check_date & consensus =="Yes" & criteria_clean == "matching" )%>%select(short_survey)%>%table()%>%data.frame()%>%rename(col = ".")
+
+long <- sn_pdm%>%filter(today==check_date)%>%select(long_survey)%>%table()%>%data.frame()%>%rename(col = ".")
+```
+
+
+```{r}
+  ## members
+member.suspected_covid <- sn_pdm%>%
+  select(today,District_Name,starts_with("Actual_Symptoms"))%>%
+  pivot_longer(.,cols = starts_with("Actual_Symptoms"), names_to = "HH_member", values_to = "Symptoms")%>%
+  select(-"HH_member")%>%
+  drop_na(Symptoms)%>%
+  mutate(Symptoms = gsub("Fever", 0.7, Symptoms),
+          Symptoms = gsub("Fatigue", 0.4, Symptoms),
+          Symptoms = gsub("Cough", 0.7, Symptoms),
+          Symptoms = gsub("Shortness of breath or difficulty breathing", 0.6, Symptoms),
+          Symptoms = gsub("Loss or change in taste or smell", 0.9, Symptoms),
+          Symptoms = gsub( "Sore throat", 0, Symptoms),
+          Symptoms = gsub( "Headache", 0, Symptoms),
+          Symptoms = gsub( "Diarrhoea or stomache pain", 0, Symptoms),
+          Symptoms = gsub("[()]", "", Symptoms),
+          Symptoms = gsub("Body aches muscle or joint pain", "0", Symptoms),
+           Symptoms = gsub( "Positive laboratory test for COVID-19", 2, Symptoms),
+           Symptoms = gsub( "Other", 0, Symptoms),
+          Symptoms = gsub( "None of the above", 0, Symptoms))%>%
+  concat.split(data = .,split.col = 3,sep = " ",drop = TRUE)%>%
+  mutate(`Covid-19 diagnostic score` = select(., starts_with("Symptoms")) %>% 
+           rowSums(na.rm = TRUE))
+ 
+suspected.cases <- full_join(member.suspected_covid%>%
+            filter(`Covid-19 diagnostic score` >=2)%>%
+            group_by(today,District_Name)%>%
+            summarise(`Number of suspected cases` = n())
+  ,member.suspected_covid%>%
+            group_by(today,District_Name)%>%
+            summarise(`Number with atleast one symptom` = n()))%>%
+  mutate(`Number of suspected cases` = replace_na(`Number of suspected cases`,0))
+
+suspected.cases_no <- sum(suspected.cases$`Number of suspected cases`, na.rm = TRUE)
+
+suspected_today <- suspected.cases%>%
+  filter(today == check_date)
+
+suspected_today_no <-sum(suspected_today$`Number of suspected cases`, na.rm = TRUE)
+
+```
+
+```{r}
+new.deaths <- sn_pdm%>%
+  filter(Residency_Status == "Dead")
+
+joined.dead <- sn_pdm%>%
+  filter(Join_Died == "Yes")
+
+today.joined.dead <- joined.dead %>%
+  filter(today == check_date)
+
+today.new.deaths <- new.deaths %>%
+  filter(today == check_date)
+```
+
+# Results overview as of end of `r check_date`
+
+\newline
+
+- `r dim(sn_pdm_full)[[1]]` interviews have been done as of end of `r check_date`,  `r sn_pdm_full%>%filter(today==check_date)%>%nrow()`  were conducted on `r check_date`.
+- As of `r check_date`, `r ifelse(table(sn_pdm$consensus)[["Yes"]]==dim(sn_pdm)[[1]],"all of the interviewees did give consent.",paste0(table(sn_pdm$consensus)[["No"]]," of the interviewees had  not given consent."))`
+- On `r check_date`, `r criteria$Freq[criteria$Var2=="matching"]`  were matching the PDM R2 sampling list and  `r ifelse(criteria$Freq[criteria$Var2=="non-matching"]%>%data.frame()%>%nrow()==0,"none",criteria$Freq[criteria$Var2=="non-matching"])` non-matching.
+- As of `r check_date`, `r sn_pdm_full%>%filter(Provide_Names=="No")%>%nrow()` respondent had declined to provide the names of the HH Members.
+- `r ifelse(short$Freq[short$col=="FALSE"] == sn_pdm%>%filter(today==check_date)%>%nrow(), "No",short$Freq[short$col=="TRUE"])` short   `r ifelse(short$Freq[short$col=="TRUE"]%>%data.frame()%>%nrow()==1,"survey was","surveys were")` done on `r check_date`.
+- `r ifelse(long$Freq[short$col=="FALSE"] == sn_pdm%>%filter(today==check_date)%>%nrow(), "No",long$Freq[long$col=="TRUE"])` long  surveys were done on `r check_date`.
+- As of `r check_date`,  a total of `r sum(as.numeric(joined.dead$Count_Died)) + nrow(new.deaths)` deaths were reported with `r sum(as.numeric(today.joined.dead$Count_Died)) + nrow(today.new.deaths)` reported  on `r check_date`.
+- As of `r check_date`, there is a total of `r suspected.cases_no` suspected cases. On `r check_date`, there were `r suspected_today_no` suspected cases.
+
+\newline
+
+
+## Consensus
+```{r consensus}
+freq(sn_pdm$consensus, style = 'rmarkdown')
+```
+
+**Details of HH that didn't consent**
+```{r}
+sn_pdm%>%
+  filter(consensus ==  "No") %>%
+  select(today,ONA_username,Refusal_reason,HoH_Name, District_Name, Community_Name)%>%knitr::kable()
+```
+
+## Matching and non-matching surveys
+
+```{r matching and non-matching surveys}
+freq(sn_pdm$criteria_clean, style = 'rmarkdown')
+```
+
+**Non-matching HH by day**
+```{r}
+table(sn_pdm$today,sn_pdm$criteria_clean)%>%knitr::kable()
+```
+
+**Non-matching HH details**
+```{r}
+sn_pdm%>%
+  filter(criteria_clean %in% "non-matching") %>%
+  select(today,ONA_username,Comment_Feedback,HoH_Name, District_Name, Community_Name)%>%knitr::kable()
+
+```
+
+## Declined to list their HH members
+
+```{r}
+sn_pdm_full%>%
+  filter(Provide_Names=="No")%>%
+  select("today","Member_id","District_Name","Community_Name","HoH_Name")%>%
+  knitr::kable()
+```
+
+## Number of short surveys (less than 12 minutes) per day
+```{r number of short surveys}
+freq(sn_pdm$short_survey, style = 'rmarkdown')
+```
+
+**Breakdown of short surveys per day**
+```{r}
+sn_pdm %>%
+  filter(short_survey == TRUE & consensus == "Yes" & criteria_clean == "matching")%>%
+  group_by(today,ONA_username)%>%
+  summarise(number = n())%>%
+  knitr::kable()
+```
+
+**Details of short surveys**
+```{r}
+sn_pdm %>%
+  filter(short_survey == TRUE & today == check_date & consensus == "Yes" & criteria_clean == "matching")%>%
+  group_by(today,ONA_username,HoH_Name, District_Name, Community_Name)%>%
+  summarise(number = n())%>%
+  knitr::kable()
+```
+
+## Number of Long surveys (more than 120 minutes) per day
+```{r number of long surveys}
+sn_pdm %>%
+  filter(long_survey == TRUE)%>%
+  group_by(today,ONA_username)%>%
+  summarise(number = n())%>%
+  knitr::kable()
+```
+
+**Details of the long surveys**
+```{r}
+sn_pdm %>%
+  filter(long_survey == TRUE & today == check_date)%>%
+  group_by(today,ONA_username,HoH_Name, District_Name, Community_Name)%>%
+  summarise(number = n())%>%
+  knitr::kable()
+```
+
+## Duration of the surveys
+```{r duration of the surveys}
+ 
+```
+
+## Number of valid surveys per district and community
+```{r valid surveys per district and community}
+sn_pdm %>%
+  filter(!Interview_criteria %in% "If most information is not matching, go to end of survey and notify your team leader.")%>%
+  group_by(District_Name, Community_Name)%>%
+  summarize(valid_surveys = n())%>%
+  arrange(desc(valid_surveys))%>%knitr::kable()
+```
+
+```{r replace unneeded strings, include=FALSE}
+na_strings <- c("NA", "N A", "N / A", "N/A", "n/a") # write out all the offending strings
+sn_pdm <- sn_pdm %>%
+  replace_with_na_all(condition = ~.x %in% na_strings)
+```
+
+## Number of missing values per variable
+```{r Number of missing values per variable}
+my_skim <- skim(sn_pdm)%>%
+  select(skim_variable, n_missing)%>%
+  arrange(desc(n_missing))  
+
+knitr::kable(my_skim[1:25,])
+```
+
+# PERFOMANCE OF ENUMERATORS
+
+\newline
+
+```{r summarise duration of survey per ONA user, include = FALSE}
+st_enum_overall <- sn_pdm%>%
+  filter(consensus == "Yes" & criteria_clean == "matching")%>%
+  group_by(ONA_username)%>%
+  summarise(sur_per_enum = n(), # number of surveys per enumerators
+            short = sum(short_survey, na.rm =T), #number of short surveys per enumerators
+            long = sum(long_survey,na.rm = T),
+            dur_av = median(min, na.rm = T))  # average survey duration per enumerator
+```
+
+
+- As of  `r check_date`, each enumerator had  conducted `r median(st_enum_overall$sur_per_enum)` surveys and took approximately `r median(st_enum_overall$dur_av)%>%round()` minutes to complete each.
+
+\newline
+
+## Summarise duration of survey per ONA user
+
+**Summary of number of interviews per enumerator**
+
+```{r view duration summaries}
+descr(st_enum_overall$sur_per_enum, style = 'rmarkdown')
+```
+
+**Summary of the duration**
+
+```{r }
+descr(st_enum_overall$dur_av, style = 'rmarkdown')
+```
+
+**Short and long surveys per enumerator**
+```{r }
+st_enum_overall%>%
+  mutate(dur_av = round(dur_av))%>%
+  knitr::kable()
+```
+
+\newline
+
+
+# Overview of some key variables for all the collected data.
+
+\newline
+
+- Most respondents report to wash their hands `r sn_pdm$hand_times%>%as.numeric()%>%mean(.,na.rm = T)%>%round()` times a day.
+
+\newline
+
+
+```{r convert select columns to numeric, include=FALSE}
+sn_pdm_full <- sn_pdm_full%>%
+  mutate_at(c("HouseholdSize", "hand_times", "hand_long", "days_prayer", "days_gatherings",
+            "days_distance", "stayed_home", "Last_Visit_Count"), as.numeric)
+```
+
+```{r define and select key variables from the dataset, include=FALSE}
+key_variables <- sn_pdm_full %>%
+  filter(!Interview_criteria == "If most information is not matching, go to end of survey and notify your team leader.")%>%
+  select(HH_age, HouseholdSize,
+         hand_times, days_prayer, days_gatherings,
+         days_distance, stayed_home, Died_Last_Visit, Last_Visit_Count)
+```
+
+## Comprehesive summary of the key variables
+```{r comprehesive summary of the key variables}
+dfSummary(key_variables,plain.ascii = FALSE, style = "grid", 
+          graph.magnif = 0.75, valid.col = FALSE, tmp.img.dir = "/tmp")
+```
+
+# DEATHS
+
+\newline
+
+- There were `r ifelse(sn_pdm%>%filter(Died_Last_Visit=="Yes" & today == check_date)%>%nrow() == 0,"no",sn_pdm%>%filter(Died_Last_Visit=="Yes" & today == check_date)%>%nrow())` deaths as from the previous day.
+
+\newline
+
+## Frequency of deaths
+```{r frequency of deaths}
+freq(as.character(sn_pdm$Died_Last_Visit), style = 'rmarkdown')# number of respondents reporting to experience a recent death
+```
+
+\newline
+
+
+## Total deaths
+
+\newline
+
+## Already listed members
+```{r}
+new.deaths%>%
+  select(today,District_Name,Community_Name,Residency_Status)%>%
+  knitr::kable()
+```
+
+\newline
+## New HH members that joined the HH after R2 and died before R3
+```{r}
+joined.dead%>%
+  select(today,District_Name,Community_Name,Join_Died,Count_Died)%>%
+  knitr::kable()
+```
+
+### Suspected Covid-19 cases
+```{r}
+suspected.cases%>%
+  mutate(`Number of suspected cases` = replace_na(`Number of suspected cases`,0),
+         `Number with atleast one symptom` = replace_na(`Number with atleast one symptom`,0))%>%
+  knitr::kable()
+```
+

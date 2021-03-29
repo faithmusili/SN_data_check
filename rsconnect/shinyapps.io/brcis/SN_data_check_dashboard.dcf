@@ -1,0 +1,12 @@
+name: SN_data_check_dashboard
+title: SN_data_check_dashboard
+username:
+account: brcis
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 3877960
+bundleId: 4406977
+url: https://brcis.shinyapps.io/SN_data_check_dashboard/
+when: 1617013143.08657
+asMultiple: FALSE
+asStatic: FALSE

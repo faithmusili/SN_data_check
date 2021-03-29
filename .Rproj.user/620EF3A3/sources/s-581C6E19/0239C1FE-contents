@@ -1,0 +1,9 @@
+data <- "read in the ona full data"
+
+descr(data$InterviewDuration, style = 'rmarkdown')
+
+ggplot(data = data) + 
+  geom_histogram(aes(x = InterviewDuration))+
+  theme_light()+
+  labs(x = "Minutes")+
+  ggtitle("Interview duration (day 1")

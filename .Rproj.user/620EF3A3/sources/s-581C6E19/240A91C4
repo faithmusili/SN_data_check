@@ -1,0 +1,25 @@
+{
+    "id": "240A91C4",
+    "path": "C:/Users/KELPTMGD1561/OneDrive - Norwegian Refugee Council/Scripts/Safety Nets/PDM/R3/data checks/SN PDM R3 data checks.Rmd",
+    "project_path": null,
+    "type": "r_markdown",
+    "hash": "0",
+    "contents": "",
+    "dirty": true,
+    "created": 1617014942220.0,
+    "source_on_save": false,
+    "relative_order": 4,
+    "properties": {
+        "chunk_output_type": "console",
+        "cursorPosition": "228,1",
+        "scrollLine": "212"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1610000223,
+    "encoding": "ASCII",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1617015079420,
+    "read_only": false,
+    "read_only_alternatives": []
+}
